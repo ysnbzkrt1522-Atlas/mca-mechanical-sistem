@@ -1,0 +1,1769 @@
+<div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success">💾 Kaydet ve Devam Et</button>
+                    <button type="button" class="btn btn-primary" onclick="saveAndNew()">💾 Kaydet ve Yeni</button>
+                    <button type="button" class="btn" onclick="closeModal('quickEntryModal')">❌ Kapat</button>
+                </div>
+                
+                <div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 5px;">
+                    <small>💡 İpucu: PDF'lerinizi açık tutun ve Tab tuşu ile alanlar arası hızla geçiş yapın.</small>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- PDF Görüntüleme Modal -->
+    <div id="pdfViewerModal" class="modal">
+        <div class="modal-content" style="max-width: 90%; max-height: 90%;">
+            <span class="close" onclick="closeModal('pdfViewerModal')">&times;</span>
+            <h3>📄 PDF Görüntüleyici</h3>
+            <div id="pdfViewerContent" style="text-align: center; margin-top: 20px;">
+                <p>PDF dosyalarınız burada görüntülenecek.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gizli dosya input -->
+    <input type="file" id="fileInput" accept=".json" style="display: none;">
+
+    <script>
+        // Veri depolama - localStorage ile kalıcı
+        let isTalepleri = JSON.parse(localStorage.getItem('mca_is_talepleri') || '[]');
+        let servisFormlari = JSON.parse(localStorage.getItem('mca_servis_formlari') || '[]');
+        let ayarlar = JSON.parse(localStorage.getItem('mca_ayarlar') || '{"firmaAdi":"MCA MECHANICAL","bolge":"Antalya","varsayilanTeknisyen":"","paraBirimi":"TL"}');
+        let pdfFiles = JSON.parse(localStorage.getItem('mca_pdf_files') || '[]');
+
+        // Sayfa yüklendiğinde
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePage();
+            updateAllTables();
+            updateSummary();
+            updateArchiveStats();
+            loadSettingsToForm();
+            setupPDFUpload();
+            setupModalEvents(); // Modal event'lerini kur
+        });
+
+        // Modal event'lerini kurma
+        function setupModalEvents() {
+            // Tüm close butonları için event listener ekle
+            document.querySelectorAll('.close').forEach(closeBtn => {
+                closeBtn.onclick = function() {
+                    this.closest('.modal').style.display = 'none';
+                };
+            });
+        }
+
+        function initializePage() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('tarih').value = today;
+            document.getElementById('formTarihi').value = today;
+            
+            // Demo veri ekle (eğer boşsa)
+            if (isTalepleri.length === 0) {
+                isTalepleri.push({
+                    id: Date.now(),
+                    musteriAdi: "ABC Ofis Merkezi",
+                    telefon: "0242 123 45 67",
+                    adres: "Muratpaşa, Antalya",
+                    isTuru: "bakim",
+                    cihazTipi: "VRF Klima Sistemi",
+                    ustLimit: 1500,
+                    tarih: today,
+                    oncelik: "normal",
+                    isAciklamasi: "Yıllık bakım işlemi",
+                    durum: 'bekliyor',
+                    olusturmaTarihi: new Date().toISOString()
+                });
+                saveData();
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('mca_is_talepleri', JSON.stringify(isTalepleri));
+            localStorage.setItem('mca_servis_formlari', JSON.stringify(servisFormlari));
+            localStorage.setItem('mca_ayarlar', JSON.stringify(ayarlar));
+            localStorage.setItem('mca_pdf_files', JSON.stringify(pdfFiles));
+        }
+
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // İş talebi ekleme
+        document.getElementById('isTalebiForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const yeniTalep = {
+                id: Date.now(),
+                musteriAdi: document.getElementById('musteriAdi').value,
+                telefon: document.getElementById('telefon').value,
+                adres: document.getElementById('adres').value,
+                isTuru: document.getElementById('isTuru').value,
+                cihazTipi: document.getElementById('cihazTipi').value,
+                ustLimit: parseFloat(document.getElementById('ustLimit').value),
+                tarih: document.getElementById('tarih').value,
+                oncelik: document.getElementById('oncelik').value,
+                isAciklamasi: document.getElementById('isAciklamasi').value,
+                durum: 'bekliyor',
+                olusturmaTarihi: new Date().toISOString()
+            };
+            
+            isTalepleri.push(yeniTalep);
+            saveData();
+            updateAllTables();
+            updateSummary();
+            
+            this.reset();
+            document.getElementById('tarih').value = new Date().toISOString().split('T')[0];
+            
+            showNotification('İş talebi başarıyla eklendi!', 'success');
+        });
+
+        // Servis formu ekleme
+        document.getElementById('servisFormForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const isTalebiId = parseInt(document.getElementById('isTalebiSec').value);
+            const isTalebi = isTalepleri.find(t => t.id === isTalebiId);
+            
+            if (!isTalebi) {
+                showNotification('Lütfen geçerli bir iş talebi seçin!', 'error');
+                return;
+            }
+            
+            const iscilikUcreti = parseFloat(document.getElementById('iscilikUcreti').value);
+            
+            if (iscilikUcreti > isTalebi.ustLimit) {
+                showNotification(`İşçilik ücreti üst limiti (${isTalebi.ustLimit} TL) aşamaz!`, 'error');
+                return;
+            }
+            
+            const yeniForm = {
+                id: Date.now(),
+                isTalebiId: isTalebiId,
+                teknisyenAdi: document.getElementById('teknisyenAdi').value,
+                baslangicSaati: document.getElementById('baslangicSaati').value,
+                bitisSaati: document.getElementById('bitisSaati').value,
+                iscilikUcreti: iscilikUcreti,
+                formTarihi: document.getElementById('formTarihi').value,
+                yapilanIsler: document.getElementById('yapilanIsler').value,
+                notlar: document.getElementById('notlar').value,
+                durum: 'onay-bekliyor',
+                olusturmaTarihi: new Date().toISOString()
+            };
+            
+            servisFormlari.push(yeniForm);
+            isTalebi.durum = 'isleniyor';
+            
+            saveData();
+            updateAllTables();
+            updateSummary();
+            
+            this.reset();
+            document.getElementById('formTarihi').value = new Date().toISOString().split('T')[0];
+            
+            showNotification('Servis formu başarıyla kaydedildi!', 'success');
+        });
+
+        // PDF oluşturma
+        function generatePDF() {
+            const isTalebiId = parseInt(document.getElementById('isTalebiSec').value);
+            if (!isTalebiId) {
+                showNotification('Lütfen önce bir iş talebi seçin!', 'error');
+                return;
+            }
+            
+            const talep = isTalepleri.find(t => t.id === isTalebiId);
+            const formData = {
+                teknisyen: document.getElementById('teknisyenAdi').value,
+                baslangic: document.getElementById('baslangicSaati').value,
+                bitis: document.getElementById('bitisSaati').value,
+                ucret: document.getElementById('iscilikUcreti').value,
+                tarih: document.getElementById('formTarihi').value,
+                yapilanIsler: document.getElementById('yapilanIsler').value,
+                notlar: document.getElementById('notlar').value
+            };
+            
+            // PDF içeriği oluştur
+            let content = `MCA MECHANICAL\n`;
+            content += `SERVİS RAPORU\n`;
+            content += `=====================================\n\n`;
+            content += `Müşteri: ${talep.musteriAdi}\n`;
+            content += `Telefon: ${talep.telefon || 'Belirtilmemiş'}\n`;
+            content += `Adres: ${talep.adres}\n`;
+            content += `İş Türü: ${talep.isTuru.toUpperCase()}\n`;
+            content += `Cihaz: ${talep.cihazTipi}\n`;
+            content += `Tarih: ${formData.tarih}\n`;
+            content += `Teknisyen: ${formData.teknisyen}\n`;
+            content += `Çalışma Saati: ${formData.baslangic} - ${formData.bitis}\n`;
+            content += `İşçilik Ücreti: ${formData.ucret} ${ayarlar.paraBirimi}\n\n`;
+            content += `Yapılan İşler:\n${formData.yapilanIsler}\n\n`;
+            
+            if (formData.notlar) {
+                content += `Notlar:\n${formData.notlar}\n\n`;
+            }
+            
+            content += `\n\nTeknisyen İmzası: _______________    Müşteri İmzası: _______________\n\n`;
+            content += `Form Tarihi: ${new Date().toLocaleString('tr-TR')}\n`;
+            content += `MCA MECHANICAL - ${ayarlar.bolge}`;
+            
+            downloadTextFile(content, `servis_formu_${talep.musteriAdi}_${formData.tarih}.txt`);
+            showNotification('PDF formu indirildi!', 'success');
+        }
+
+        // PDF yükleme sistemi
+        function setupPDFUpload() {
+            const pdfInput = document.getElementById('pdfInput');
+            const pdfPreview = document.getElementById('pdfPreview');
+            
+            pdfInput.addEventListener('change', function(e) {
+                const files = e.target.files;
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    
+                    // Dosya boyutu kontrolü (5MB)
+                    if (file.size > 5 * 1024 * 1024) {
+                        showNotification(`${file.name} dosyası çok büyük (max 5MB)`, 'error');
+                        continue;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const pdfData = {
+                            id: Date.now() + Math.random(),
+                            name: file.name,
+                            type: file.type,
+                            size: file.size,
+                            data: event.target.result,
+                            uploadDate: new Date().toISOString()
+                        };
+                        
+                        pdfFiles.push(pdfData);
+                        saveData();
+                        displayPDFPreview();
+                        updateArchiveStats();
+                    };
+                    
+                    reader.readAsDataURL(file);
+                }
+            });
+            
+            displayPDFPreview();
+        }
+
+        function displayPDFPreview() {
+            const pdfPreview = document.getElementById('pdfPreview');
+            pdfPreview.innerHTML = '';
+            
+            pdfFiles.forEach((pdf, index) => {
+                const pdfItem = document.createElement('div');
+                pdfItem.className = 'pdf-item';
+                
+                pdfItem.innerHTML = `
+                    <div style="margin-bottom: 10px;">
+                        ${pdf.type.includes('pdf') ? '📄' : '🖼️'} 
+                    </div>
+                    <strong>${pdf.name}</strong>
+                    <p style="font-size: 12px; color: #666;">
+                        ${formatBytes(pdf.size)}<br>
+                        ${formatDate(pdf.uploadDate)}
+                    </p>
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-primary btn-small" onclick="viewPDF(${index})">👁️ Görüntüle</button>
+                        <button class="btn btn-danger btn-small" onclick="deletePDF(${index})">🗑️ Sil</button>
+                    </div>
+                `;
+                
+                pdfPreview.appendChild(pdfItem);
+            });
+        }
+
+        function viewPDF(index) {
+            const pdf = pdfFiles[index];
+            const modal = document.getElementById('pdfViewerModal');
+            const content = document.getElementById('pdfViewerContent');
+            
+            if (pdf.type.includes('pdf')) {
+                content.innerHTML = `
+                    <embed src="${pdf.data}" width="100%" height="600px" type="application/pdf">
+                    <p style="margin-top: 10px;">
+                        <a href="${pdf.data}" download="${pdf.name}" class="btn btn-primary">💾 İndir</a>
+                    </p>
+                `;
+            } else {
+                content.innerHTML = `
+                    <img src="${pdf.data}" style="max-width: 100%; max-height: 600px;" alt="${pdf.name}">
+                    <p style="margin-top: 10px;">
+                        <a href="${pdf.data}" download="${pdf.name}" class="btn btn-primary">💾 İndir</a>
+                    </p>
+                `;
+            }
+            
+            modal.style.display = 'block';
+        }
+
+        function deletePDF(index) {
+            if (confirm('Bu PDF dosyasını silmek istediğinizden emin misiniz?')) {
+                pdfFiles.splice(index, 1);
+                saveData();
+                displayPDFPreview();
+                updateArchiveStats();
+                showNotification('PDF dosyası silindi', 'success');
+            }
+        }
+
+        function showPDFViewer() {
+            if (pdfFiles.length === 0) {
+                showNotification('Henüz PDF dosyası yüklenmemiş', 'warning');
+                return;
+            }
+            viewPDF(0);
+        }
+
+        // Hızlı giriş fonksiyonları
+        function openQuickEntry() {
+            document.getElementById('quickEntryModal').style.display = 'block';
+            document.getElementById('qFormTarihi').value = new Date().toISOString().split('T')[0];
+        }
+
+        document.getElementById('quickEntryForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            saveQuickEntry(false);
+        });
+
+        function saveAndNew() {
+            saveQuickEntry(true);
+        }
+
+        function saveQuickEntry(clearForm) {
+            // İş talebi oluştur
+            const isTalebi = {
+                id: Date.now(),
+                musteriAdi: document.getElementById('qMusteriAdi').value,
+                telefon: document.getElementById('qTelefon').value,
+                adres: document.getElementById('qAdres').value,
+                isTuru: document.getElementById('qIsTuru').value,
+                cihazTipi: document.getElementById('qCihazTipi').value,
+                ustLimit: parseFloat(document.getElementById('qIscilik').value) * 1.2,
+                tarih: document.getElementById('qFormTarihi').value,
+                oncelik: "normal",
+                isAciklamasi: "Eski formdan aktarıldı",
+                durum: 'tamamlandi',
+                olusturmaTarihi: document.getElementById('qFormTarihi').value + 'T00:00:00.000Z'
+            };
+            
+            isTalepleri.push(isTalebi);
+            
+            // Servis formu oluştur
+            const servisFormu = {
+                id: Date.now() + 1,
+                isTalebiId: isTalebi.id,
+                teknisyenAdi: document.getElementById('qTeknisyen').value,
+                baslangicSaati: document.getElementById('qBaslangic').value || '08:00',
+                bitisSaati: document.getElementById('qBitis').value || '17:00',
+                iscilikUcreti: parseFloat(document.getElementById('qIscilik').value),
+                formTarihi: document.getElementById('qFormTarihi').value,
+                yapilanIsler: document.getElementById('qYapilanIsler').value,
+                notlar: document.getElementById('qNotlar').value + ' [Eski formdan aktarıldı]',
+                durum: 'onaylandi',
+                olusturmaTarihi: document.getElementById('qFormTarihi').value + 'T00:00:00.000Z'
+            };
+            
+            servisFormlari.push(servisFormu);
+            
+            saveData();
+            updateAllTables();
+            updateSummary();
+            
+            if (clearForm) {
+                const tarih = document.getElementById('qFormTarihi').value;
+                document.getElementById('quickEntryForm').reset();
+                document.getElementById('qFormTarihi').value = tarih;
+                document.getElementById('qMusteriAdi').focus();
+                showNotification('Form kaydedildi! Yeni form için hazır.', 'success');
+            } else {
+                closeModal('quickEntryModal');
+                showNotification('Eski form başarıyla sisteme aktarıldı!', 'success');
+            }
+        }
+
+        function updateAllTables() {
+            updateIsTalepleriTable();
+            updateServisFormlariTable();
+            updateIsTalebiSelect();
+        }
+
+        function updateIsTalepleriTable() {
+            const tbody = document.getElementById('isTalepleriTbody');
+            tbody.innerHTML = '';
+            
+            isTalepleri.sort((a, b) => new Date(b.olusturmaTarihi) - new Date(a.olusturmaTarihi)).forEach(talep => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${formatDate(talep.tarih)}</td>
+                    <td><strong>${talep.musteriAdi}</strong></td>
+                    <td><span style="background: #e3f2fd; padding: 2px 8px; border-radius: 10px; font-size: 11px;">${talep.isTuru.toUpperCase()}</span></td>
+                    <td>${talep.cihazTipi}</td>
+                    <td><strong>${talep.ustLimit.toFixed(2)} ${ayarlar.paraBirimi}</strong></td>
+                    <td><span class="status-badge status-${getStatusClass(talep.durum)}">${getDurumText(talep.durum)}</span></td>
+                    <td>
+                        <button class="btn btn-primary btn-small" onclick="showDetail('is', ${talep.id})" title="Detay">👁️</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteIsTalebi(${talep.id})" title="Sil">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function updateServisFormlariTable() {
+            const tbody = document.getElementById('servisFormlariTbody');
+            tbody.innerHTML = '';
+            
+            servisFormlari.sort((a, b) => new Date(b.formTarihi) - new Date(a.formTarihi)).forEach(form => {
+                const isTalebi = isTalepleri.find(t => t.id === form.isTalebiId);
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${formatDate(form.formTarihi)}</td>
+                    <td><strong>${form.teknisyenAdi}</strong></td>
+                    <td>${isTalebi ? isTalebi.musteriAdi : 'Silinmiş Talep'}</td>
+                    <td>${calculateDuration(form.baslangicSaati, form.bitisSaati)}</td>
+                    <td><strong>${form.iscilikUcreti.toFixed(2)} ${ayarlar.paraBirimi}</strong></td>
+                    <td><span class="status-badge status-${getStatusClass(form.durum)}">${getDurumText(form.durum)}</span></td>
+                    <td>
+                        <button class="btn btn-primary btn-small" onclick="showDetail('form', ${form.id})" title="Detay">👁️</button>
+                        <button class="btn btn-success btn-small" onclick="approveForm(${form.id})" title="Onayla">✅</button>
+                        <button class="btn btn-warning btn-small" onclick="generateFormPDF(${form.id})" title="PDF">📄</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteServisForm(${form.id})" title="Sil">🗑️</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function updateIsTalebiSelect() {
+            const select = document.getElementById('isTalebiSec');
+            select.innerHTML = '<option value="">İş Talebi Seçin...</option>';
+            
+            isTalepleri.filter(t => t.durum !== 'tamamlandi').forEach(talep => {
+                const option = document.createElement('option');
+                option.value = talep.id;
+                option.textContent = `${talep.musteriAdi} - ${talep.isTuru.toUpperCase()}`;
+                select.appendChild(option);
+            });
+        }
+
+        function updateSummary() {
+            const toplamTalep = isTalepleri.length;
+            const tamamlanan = isTalepleri.filter(t => t.durum === 'tamamlandi').length;
+            const bekleyen = isTalepleri.filter(t => t.durum === 'bekliyor').length;
+            
+            const onaylananFormlar = servisFormlari.filter(f => f.durum === 'onaylandi');
+            const toplamKazanc = onaylananFormlar.reduce((total, form) => total + form.iscilikUcreti, 0);
+            
+            document.getElementById('toplamIsTalepleri').textContent = toplamTalep;
+            document.getElementById('tamamlananIsler').textContent = tamamlanan;
+            document.getElementById('bekleyenIsler').textContent = bekleyen;
+            document.getElementById('toplamKazanc').textContent = `${ayarlar.paraBirimi === 'TL' ? '₺' : ayarlar.paraBirimi}${toplamKazanc.toFixed(2)}`;
+        }
+
+        function updateArchiveStats() {
+            const veriBoyu = new Blob([JSON.stringify({
+                isTalepleri,
+                servisFormlari,
+                ayarlar,
+                pdfFiles: pdfFiles.map(p => ({...p, data: '[DATA]'})) // Veri boyutu için sadece meta bilgi
+            })]).size;
+            
+            const pdfBoyu = pdfFiles.reduce((total, pdf) => total + pdf.size, 0);
+            
+            document.getElementById('arsivisTalepleri').textContent = isTalepleri.length;
+            document.getElementById('arsivServisFormlari').textContent = servisFormlari.length;
+            document.getElementById('arsivPDFSayisi').textContent = pdfFiles.length;
+            document.getElementById('arsivVeriBoyu').textContent = formatBytes(veriBoyu + pdfBoyu);
+        }
+
+        // Form PDF'i oluşturma
+        function generateFormPDF(formId) {
+            const form = servisFormlari.find(f => f.id === formId);
+            const talep = isTalepleri.find(t => t.id === form.isTalebiId);
+            
+            if (!form || !talep) {
+                showNotification('Form veya iş talebi bulunamadı!', 'error');
+                return;
+            }
+            
+            let content = `MCA MECHANICAL\n`;
+            content += `SERVİS RAPORU\n`;
+            content += `=====================================\n\n`;
+            content += `Müşteri: ${talep.musteriAdi}\n`;
+            content += `Telefon: ${talep.telefon || 'Belirtilmemiş'}\n`;
+            content += `Adres: ${talep.adres}\n`;
+            content += `İş Türü: ${talep.isTuru.toUpperCase()}\n`;
+            content += `Cihaz: ${talep.cihazTipi}\n`;
+            content += `Tarih: ${form.formTarihi}\n`;
+            content += `Teknisyen: ${form.teknisyenAdi}\n`;
+            content += `Çalışma Saati: ${form.baslangicSaati} - ${form.bitisSaati}\n`;
+            content += `İşçilik Ücreti: ${form.iscilikUcreti} ${ayarlar.paraBirimi}\n\n`;
+            content += `Yapılan İşler:\n${form.yapilanIsler}\n\n`;
+            
+            if (form.notlar) {
+                content += `Notlar:\n${form.notlar}\n\n`;
+            }
+            
+            content += `\n\nTeknisyen İmzası: _______________    Müşteri İmzası: _______________\n\n`;
+            content += `Form Tarihi: ${formatDate(form.formTarihi)}\n`;
+            content += `MCA MECHANICAL - ${ayarlar.bolge}`;
+            
+            downloadTextFile(content, `servis_formu_${talep.musteriAdi}_${form.formTarihi}.txt`);
+            showNotification('Form PDF\'i indirildi!', 'success');
+        }
+
+        // Yardımcı fonksiyonlar
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleDateString('tr-TR');
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function getStatusClass(durum) {
+            const classes = {
+                'bekliyor': 'pending',
+                'isleniyor': 'pending',
+                'tamamlandi': 'completed',
+                'onay-bekliyor': 'pending',
+                'onaylandi': 'approved'
+            };
+            return classes[durum] || 'pending';
+        }
+
+        function getDurumText(durum) {
+            const durumlar = {
+                'bekliyor': 'Bekliyor',
+                'isleniyor': 'İşleniyor',
+                'tamamlandi': 'Tamamlandı',
+                'onay-bekliyor': 'Onay Bekliyor',
+                'onaylandi': 'Onaylandı'
+            };
+            return durumlar[durum] || durum;
+        }
+
+        function calculateDuration(start, end) {
+            if (!start || !end) return '-';
+            const startTime = new Date(`2000-01-01T${start}`);
+            const endTime = new Date(`2000-01-01T${end}`);
+            if (endTime <= startTime) return '-';
+            
+            const diff = endTime - startTime;
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            return `${hours}:${minutes.toString().padStart(2, '0')}`;
+        }
+
+        // Detay gösterme
+        function showDetail(type, id) {
+            const modal = document.getElementById('detailModal');
+            const content = document.getElementById('modalContent');
+            
+            if (type === 'is') {
+                const talep = isTalepleri.find(t => t.id === id);
+                if (talep) {
+                    content.innerHTML = `
+                        <h3>📋 İş Talebi Detayları</h3>
+                        <div style="margin: 20px 0;">
+                            <p><strong>Müşteri:</strong> ${talep.musteriAdi}</p>
+                            <p><strong>Telefon:</strong> ${talep.telefon || 'Belirtilmemiş'}</p>
+                            <p><strong>Adres:</strong> ${talep.adres}</p>
+                            <p><strong>İş Türü:</strong> ${talep.isTuru.toUpperCase()}</p>
+                            <p><strong>Cihaz:</strong> ${talep.cihazTipi}</p>
+                            <p><strong>Üst Limit:</strong> ${talep.ustLimit.toFixed(2)} ${ayarlar.paraBirimi}</p>
+                            <p><strong>Planlanan Tarih:</strong> ${formatDate(talep.tarih)}</p>
+                            <p><strong>Öncelik:</strong> ${talep.oncelik.toUpperCase()}</p>
+                            <p><strong>Durum:</strong> ${getDurumText(talep.durum)}</p>
+                            <p><strong>Açıklama:</strong> ${talep.isAciklamasi || 'Belirtilmemiş'}</p>
+                        </div>
+                    `;
+                }
+            } else if (type === 'form') {
+                const form = servisFormlari.find(f => f.id === id);
+                const talep = isTalepleri.find(t => t.id === form?.isTalebiId);
+                if (form) {
+                    content.innerHTML = `
+                        <h3>📝 Servis Formu Detayları</h3>
+                        <div style="margin: 20px 0;">
+                            <p><strong>Müşteri:</strong> ${talep ? talep.musteriAdi : 'Silinmiş Talep'}</p>
+                            <p><strong>Teknisyen:</strong> ${form.teknisyenAdi}</p>
+                            <p><strong>Tarih:</strong> ${formatDate(form.formTarihi)}</p>
+                            <p><strong>Çalışma Saati:</strong> ${form.baslangicSaati} - ${form.bitisSaati}</p>
+                            <p><strong>Toplam Süre:</strong> ${calculateDuration(form.baslangicSaati, form.bitisSaati)}</p>
+                            <p><strong>İşçilik Ücreti:</strong> ${form.iscilikUcreti.toFixed(2)} ${ayarlar.paraBirimi}</p>
+                            <p><strong>Durum:</strong> ${getDurumText(form.durum)}</p>
+                        </div>
+                        <div style="margin-top: 20px;">
+                            <p><strong>Yapılan İşler:</strong></p>
+                            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                                ${form.yapilanIsler}
+                            </div>
+                            ${form.notlar ? `
+                                <p><strong>Notlar:</strong></p>
+                                <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                                    ${form.notlar}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+            }
+            
+            modal.style.display = 'block';
+        }
+
+        // Silme işlemleri
+        function deleteIsTalebi(id) {
+            if (confirm('Bu iş talebini ve ilgili servis formlarını silmek istediğinizden emin misiniz?')) {
+                isTalepleri = isTalepleri.filter(t => t.id !== id);
+                servisFormlari = servisFormlari.filter(f => f.isTalebiId !== id);
+                
+                saveData();
+                updateAllTables();
+                updateSummary();
+                showNotification('İş talebi silindi', 'success');
+            }
+        }
+
+        function deleteServisForm(id) {
+            if (confirm('Bu servis formunu silmek istediğinizden emin misiniz?')) {
+                const form = servisFormlari.find(f => f.id === id);
+                if (form) {
+                    const talep = isTalepleri.find(t => t.id === form.isTalebiId);
+                    if (talep && talep.durum === 'isleniyor') {
+                        talep.durum = 'bekliyor';
+                    }
+                }
+                
+                servisFormlari = servisFormlari.filter(f => f.id !== id);
+                
+                saveData();
+                updateAllTables();
+                updateSummary();
+                showNotification('Servis formu silindi', 'success');
+            }
+        }
+
+        // Onaylama işlemi
+        function approveForm(id) {
+            const form = servisFormlari.find(f => f.id === id);
+            if (form && form.durum !== 'onaylandi') {
+                form.durum = 'onaylandi';
+                
+                const talep = isTalepleri.find(t => t.id === form.isTalebiId);
+                if (talep) {
+                    talep.durum = 'tamamlandi';
+                }
+                
+                saveData();
+                updateAllTables();
+                updateSummary();
+                showNotification('Servis formu onaylandı!', 'success');
+            }
+        }
+
+        // Rapor oluşturma
+        function generateReport() {
+            const baslangic = document.getElementById('raporBaslangic').value;
+            const bitis = document.getElementById('raporBitis').value;
+            const tur = document.getElementById('raporTuru').value;
+            
+            if (!baslangic || !bitis) {
+                showNotification('Lütfen başlangıç ve bitiş tarihlerini seçin!', 'error');
+                return;
+            }
+            
+            const filtreliFormlar = servisFormlari.filter(form => {
+                const formTarih = new Date(form.formTarihi);
+                return formTarih >= new Date(baslangic) && formTarih <= new Date(bitis);
+            });
+            
+            const raporSonuclari = document.getElementById('raporSonuclari');
+            
+            if (filtreliFormlar.length === 0) {
+                raporSonuclari.innerHTML = '<p>Seçilen tarih aralığında veri bulunamadı.</p>';
+                return;
+            }
+            
+            let raporHTML = `
+                <div class="table-container">
+                    <div class="table-header">
+                        <h3>📊 ${tur.charAt(0).toUpperCase() + tur.slice(1)} Raporu</h3>
+                        <span>${formatDate(baslangic)} - ${formatDate(bitis)}</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Teknisyen</th>
+                                <th>Müşteri</th>
+                                <th>İş Türü</th>
+                                <th>Süre</th>
+                                <th>İşçilik</th>
+                                <th>Durum</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            let toplamIscilik = 0;
+            
+            filtreliFormlar.forEach(form => {
+                const talep = isTalepleri.find(t => t.id === form.isTalebiId);
+                toplamIscilik += form.iscilikUcreti;
+                
+                raporHTML += `
+                    <tr>
+                        <td>${formatDate(form.formTarihi)}</td>
+                        <td>${form.teknisyenAdi}</td>
+                        <td>${talep ? talep.musteriAdi : 'Silinmiş'}</td>
+                        <td>${talep ? talep.isTuru.toUpperCase() : '-'}</td>
+                        <td>${calculateDuration(form.baslangicSaati, form.bitisSaati)}</td>
+                        <td>${form.iscilikUcreti.toFixed(2)} ${ayarlar.paraBirimi}</td>
+                        <td><span class="status-badge status-${getStatusClass(form.durum)}">${getDurumText(form.durum)}</span></td>
+                    </tr>
+                `;
+            });
+            
+            raporHTML += `
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <h4>📈 Özet:</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <div><strong>Toplam İş:</strong> ${filtreliFormlar.length}</div>
+                            <div><strong>Toplam İşçilik:</strong> ${toplamIscilik.toFixed(2)} ${ayarlar.paraBirimi}</div>
+                            <div><strong>Ortalama İşçilik:</strong> ${(toplamIscilik / filtreliFormlar.length).toFixed(2)} ${ayarlar.paraBirimi}</div>
+                            <div><strong>Onaylanan:</strong> ${filtreliFormlar.filter(f => f.durum === 'onaylandi').length}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            raporSonuclari.innerHTML = raporHTML;
+            showNotification(`${filtreliFormlar.length} kayıt içeren rapor oluşturuldu`, 'success');
+        }
+
+        // PDF raporu dışa aktarma
+        function exportReportPDF() {
+            const baslangic = document.getElementById('raporBaslangic').value;
+            const bitis = document.getElementById('raporBitis').value;
+            const tur = document.getElementById('raporTuru').value;
+            
+            if (!baslangic || !bitis) {
+                showNotification('Lütfen rapor parametrelerini ayarlayın!', 'error');
+                return;
+            }
+            
+            const filtreliFormlar = servisFormlari.filter(form => {
+                const formTarih = new Date(form.formTarihi);
+                return formTarih >= new Date(baslangic) && formTarih <= new Date(bitis);
+            });
+            
+            let content = `MCA MECHANICAL\n`;
+            content += `${tur.toUpperCase()} RAPORU\n`;
+            content += `=====================================\n`;
+            content += `Tarih Aralığı: ${formatDate(baslangic)} - ${formatDate(bitis)}\n`;
+            content += `Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')}\n\n`;
+            
+            let toplamIscilik = 0;
+            
+            filtreliFormlar.forEach(form => {
+                const talep = isTalepleri.find(t => t.id === form.isTalebiId);
+                toplamIscilik += form.iscilikUcreti;
+                
+                content += `Tarih: ${formatDate(form.formTarihi)}\n`;
+                content += `Teknisyen: ${form.teknisyenAdi}\n`;
+                content += `Müşteri: ${talep ? talep.musteriAdi : 'Silinmiş'}\n`;
+                content += `İş Türü: ${talep ? talep.isTuru.toUpperCase() : '-'}\n`;
+                content += `Süre: ${calculateDuration(form.baslangicSaati, form.bitisSaati)}\n`;
+                content += `İşçilik: ${form.iscilikUcreti.toFixed(2)} ${ayarlar.paraBirimi}\n`;
+                content += `Durum: ${getDurumText(form.durum)}\n`;
+                content += `Yapılan İşler: ${form.yapilanIsler}\n`;
+                content += `---\n`;
+            });
+            
+            content += `\nÖZET BİLGİLER:\n`;
+            content += `=====================================\n`;
+            content += `Toplam İş Sayısı: ${filtreliFormlar.length}\n`;
+            content += `Toplam İşçilik: ${toplamIscilik.toFixed(2)} ${ayarlar.paraBirimi}\n`;
+            content += `Ortalama İşçilik: ${(toplamIscilik / filtreliFormlar.length).toFixed(2)} ${ayarlar.paraBirimi}\n`;
+            content += `Onaylanan İşler: ${filtreliFormlar.filter(f => f.durum === 'onaylandi').length}\n\n`;
+            content += `MCA MECHANICAL - ${ayarlar.bolge}`;
+            
+            downloadTextFile(content, `${tur}_raporu_${baslangic}_${bitis}.txt`);
+            showNotification('PDF raporu indirildi!', 'success');
+        }
+
+        // Tam yedek alma
+        function exportFullBackup() {
+            const backupData = {
+                version: '2.0.0',
+                timestamp: new Date().toISOString(),
+                data: {
+                    isTalepleri: isTalepleri,
+                    servisFormlari: servisFormlari,
+                    ayarlar: ayarlar,
+                    pdfFiles: pdfFiles
+                }
+            };
+            
+            const jsonContent = JSON.stringify(backupData, null, 2);
+            downloadTextFile(jsonContent, `mca_mechanical_yedek_${new Date().toISOString().split('T')[0]}.json`);
+            showNotification('Tam yedek başarıyla oluşturuldu!', 'success');
+        }
+
+        // Yedek içe aktarma
+        function importBackup() {
+            const input = document.getElementById('fileInput');
+            
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const backupData = JSON.parse(event.target.result);
+                        
+                        if (confirm('Mevcut tüm veriler silinecek ve yedek veriler yüklenecek. Devam etmek istiyor musunuz?')) {
+                            if (backupData.data) {
+                                isTalepleri = backupData.data.isTalepleri || [];
+                                servisFormlari = backupData.data.servisFormlari || [];
+                                ayarlar = { ...ayarlar, ...(backupData.data.ayarlar || {}) };
+                                pdfFiles = backupData.data.pdfFiles || [];
+                            } else {
+                                // Eski format desteği
+                                isTalepleri = backupData.isTalepleri || [];
+                                servisFormlari = backupData.servisFormlari || [];
+                                ayarlar = { ...ayarlar, ...(backupData.ayarlar || {}) };
+                                pdfFiles = [];
+                            }
+                            
+                            saveData();
+                            loadSettingsToForm();
+                            updateAllTables();
+                            updateSummary();
+                            updateArchiveStats();
+                            displayPDFPreview();
+                            
+                            showNotification(`Yedek başarıyla yüklendi! ${isTalepleri.length} iş talebi, ${servisFormlari.length} servis formu, ${pdfFiles.length} PDF dosyası geri yüklendi.`, 'success');
+                        }
+                    } catch (error) {
+                        console.error('Yedek yükleme hatası:', error);
+                        showNotification('Yedek dosyası geçersiz!', 'error');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            
+            input.click();
+        }
+
+        // Tüm verileri temizle
+        function clearAllData() {
+            if (confirm('TÜM VERİLER SİLİNECEK! Bu işlem geri alınamaz. Emin misiniz?')) {
+                if (confirm('Son kez soruyorum: Tüm veriler ve PDF dosyaları silinecek. Devam etmek istiyor musunuz?')) {
+                    isTalepleri = [];
+                    servisFormlari = [];
+                    pdfFiles = [];
+                    saveData();
+                    updateAllTables();
+                    updateSummary();
+                    updateArchiveStats();
+                    displayPDFPreview();
+                    showNotification('Tüm veriler temizlendi!', 'success');
+                }
+            }
+        }
+
+        // Ayarları kaydetme
+        function saveSettings() {
+            ayarlar.firmaAdi = document.getElementById('firmaAdi').value;
+            ayarlar.bolge = document.getElementById('bolge').value;
+            ayarlar.varsayilanTeknisyen = document.getElementById('varsayilanTeknisyen').value;
+            ayarlar.paraBirimi = document.getElementById('paraBirimi').value;
+            
+            saveData();
+            updateSummary();
+            showNotification('Ayarlar başarıyla kaydedildi!', 'success');
+        }
+
+        // Ayarları forma yükleme
+        function loadSettingsToForm() {
+            document.getElementById('firmaAdi').value = ayarlar.firmaAdi || 'MCA MECHANICAL';
+            document.getElementById('bolge').value = ayarlar.bolge || 'Antalya';
+            document.getElementById('varsayilanTeknisyen').value = ayarlar.varsayilanTeknisyen || '';
+            document.getElementById('paraBirimi').value = ayarlar.paraBirimi || 'TL';
+        }
+
+        // Dosya indirme
+        function downloadTextFile(content, filename) {
+            const element = document.createElement('a');
+            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
+            element.setAttribute('download', filename);
+            element.style.display = 'none';
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+        }
+
+        // Bildirim gösterme
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 4000);
+        }
+
+        // Modal kapatma
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Arama fonksiyonları
+        document.getElementById('searchIsTalepleri').addEventListener('input', function(e) {
+            filterTable('isTalepleriTable', e.target.value);
+        });
+        
+        document.getElementById('searchServisFormlari').addEventListener('input', function(e) {
+            filterTable('servisFormlariTable', e.target.value);
+        });
+
+        function filterTable(tableId, searchTerm) {
+            const table = document.getElementById(tableId);
+            const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm.toLowerCase()) ? '' : 'none';
+            }
+        }
+
+        // Modal kapatma event'leri
+        function setupModalEvents() {
+            // Tüm close butonları için event listener ekle
+            document.querySelectorAll('.close').forEach(closeBtn => {
+                closeBtn.onclick = function() {
+                    this.closest('.modal').style.display = 'none';
+                };
+            });
+        }
+
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        }
+
+        // Manuel modal kapatma fonksiyonu
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // ESC tuşu ile modal kapatma
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal').forEach(modal => {
+                    if (modal.style.display === 'block') {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+        });
+
+        // Otomatik kaydetme
+        setInterval(() => {
+            saveData();
+        }, 30000); // 30 saniyede bir otomatik kaydet
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCA MECHANICAL - Arşiv Sistemi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            padding: 25px;
+        }
+        
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            overflow-x: auto;
+        }
+        
+        .tab-button {
+            flex: 1;
+            min-width: 140px;
+            padding: 15px 20px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            color: #666;
+        }
+        
+        .tab-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .form-group label {
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+        }
+        
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+            margin: 2px;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .search-box {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 13px;
+        }
+        
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        tr:hover {
+            background: #e3f2fd;
+        }
+        
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-approved { background: #d4edda; color: #155724; }
+        .status-completed { background: #d1ecf1; color: #0c5460; }
+        
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .summary-card {
+            background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+        
+        .summary-card:hover {
+            transform: translateY(-3px);
+        }
+        
+        .summary-card h3 {
+            color: #667eea;
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+        
+        .summary-card p {
+            color: #666;
+            font-weight: 600;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            z-index: 1000;
+        }
+        
+        .notification.success { background: #4CAF50; }
+        .notification.error { background: #f44336; }
+        .notification.warning { background: #FF9800; }
+        .notification.info { background: #2196F3; }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background: white;
+            margin: 5% auto;
+            padding: 25px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .pdf-section {
+            background: #e8f5e8;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .pdf-upload-area {
+            border: 2px dashed #4CAF50;
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px;
+            background: rgba(76, 175, 80, 0.1);
+            margin: 15px 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .pdf-upload-area:hover {
+            background: rgba(76, 175, 80, 0.2);
+            border-color: #45a049;
+        }
+        
+        .pdf-preview {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .pdf-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .main-content {
+                padding: 15px;
+            }
+            
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-box {
+                min-width: auto;
+                width: 100%;
+            }
+            
+            .table-header {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏢 MCA MECHANICAL</h1>
+            <p>Antalya Bölgesi - Servis Takip Sistemi</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="tabs">
+                <button class="tab-button active" onclick="showTab('is-talepleri')">📋 İş Talepleri</button>
+                <button class="tab-button" onclick="showTab('servis-formlari')">📝 Servis Formları</button>
+                <button class="tab-button" onclick="showTab('raporlar')">📈 Raporlar</button>
+                <button class="tab-button" onclick="showTab('arsiv')">🗄️ PDF Arşivi</button>
+                <button class="tab-button" onclick="showTab('ayarlar')">⚙️ Ayarlar</button>
+            </div>
+            
+            <!-- İş Talepleri Tab -->
+            <div id="is-talepleri" class="tab-content active">
+                <h2 style="margin-bottom: 20px;">📋 Yeni İş Talebi Ekle</h2>
+                <form id="isTalebiForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Müşteri Adı *</label>
+                            <input type="text" id="musteriAdi" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Telefon</label>
+                            <input type="tel" id="telefon">
+                        </div>
+                        <div class="form-group">
+                            <label>Adres *</label>
+                            <input type="text" id="adres" required>
+                        </div>
+                        <div class="form-group">
+                            <label>İş Türü *</label>
+                            <select id="isTuru" required>
+                                <option value="">Seçiniz</option>
+                                <option value="servis">Servis</option>
+                                <option value="bakim">Bakım</option>
+                                <option value="onarim">Onarım</option>
+                                <option value="montaj">Montaj</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cihaz Tipi *</label>
+                            <input type="text" id="cihazTipi" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Üst Limit (TL) *</label>
+                            <input type="number" id="ustLimit" min="0" step="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Tarih *</label>
+                            <input type="date" id="tarih" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Öncelik</label>
+                            <select id="oncelik">
+                                <option value="normal">Normal</option>
+                                <option value="yüksek">Yüksek</option>
+                                <option value="acil">Acil</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>İş Açıklaması</label>
+                        <textarea id="isAciklamasi" rows="3"></textarea>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <button type="submit" class="btn btn-primary">✅ İş Talebi Ekle</button>
+                        <button type="reset" class="btn">🔄 Temizle</button>
+                    </div>
+                </form>
+                
+                <div class="table-container" style="margin-top: 30px;">
+                    <div class="table-header">
+                        <h3>📊 Aktif İş Talepleri</h3>
+                        <input type="text" class="search-box" id="searchIsTalepleri" placeholder="🔍 Arama...">
+                    </div>
+                    <table id="isTalepleriTable">
+                        <thead>
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Müşteri</th>
+                                <th>İş Türü</th>
+                                <th>Cihaz</th>
+                                <th>Limit</th>
+                                <th>Durum</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="isTalepleriTbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Servis Formları Tab -->
+            <div id="servis-formlari" class="tab-content">
+                <h2 style="margin-bottom: 20px;">📝 Günlük Servis Formu</h2>
+                <form id="servisFormForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>İş Talebi Seç *</label>
+                            <select id="isTalebiSec" required>
+                                <option value="">Seçiniz</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Teknisyen Adı *</label>
+                            <input type="text" id="teknisyenAdi" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Başlangıç Saati *</label>
+                            <input type="time" id="baslangicSaati" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Bitiş Saati *</label>
+                            <input type="time" id="bitisSaati" required>
+                        </div>
+                        <div class="form-group">
+                            <label>İşçilik Ücreti (TL) *</label>
+                            <input type="number" id="iscilikUcreti" min="0" step="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Form Tarihi *</label>
+                            <input type="date" id="formTarihi" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Yapılan İşler *</label>
+                        <textarea id="yapilanIsler" rows="4" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notlar</label>
+                        <textarea id="notlar" rows="2"></textarea>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <button type="submit" class="btn btn-success">💾 Servis Formu Kaydet</button>
+                        <button type="button" class="btn btn-warning" onclick="generatePDF()">📄 PDF Oluştur</button>
+                        <button type="reset" class="btn">🔄 Temizle</button>
+                    </div>
+                </form>
+                
+                <div class="table-container" style="margin-top: 30px;">
+                    <div class="table-header">
+                        <h3>📋 Servis Formları</h3>
+                        <input type="text" class="search-box" id="searchServisFormlari" placeholder="🔍 Arama...">
+                    </div>
+                    <table id="servisFormlariTable">
+                        <thead>
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Teknisyen</th>
+                                <th>Müşteri</th>
+                                <th>Süre</th>
+                                <th>İşçilik</th>
+                                <th>Durum</th>
+                                <th>İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody id="servisFormlariTbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Raporlar Tab -->
+            <div id="raporlar" class="tab-content">
+                <h2 style="margin-bottom: 20px;">📈 Raporlar ve İstatistikler</h2>
+                
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <h3 id="toplamIsTalepleri">0</h3>
+                        <p>Toplam İş Talepleri</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3 id="tamamlananIsler">0</h3>
+                        <p>Tamamlanan İşler</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3 id="bekleyenIsler">0</h3>
+                        <p>Bekleyen İşler</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3 id="toplamKazanc">₺0</h3>
+                        <p>Toplam Kazanç</p>
+                    </div>
+                </div>
+                
+                <div class="form-grid" style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
+                    <div class="form-group">
+                        <label>Başlangıç Tarihi</label>
+                        <input type="date" id="raporBaslangic">
+                    </div>
+                    <div class="form-group">
+                        <label>Bitiş Tarihi</label>
+                        <input type="date" id="raporBitis">
+                    </div>
+                    <div class="form-group">
+                        <label>Rapor Türü</label>
+                        <select id="raporTuru">
+                            <option value="genel">Genel Rapor</option>
+                            <option value="teknisyen">Teknisyen Bazlı</option>
+                            <option value="finansal">Finansal Rapor</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="generateReport()">📈 Rapor Oluştur</button>
+                    <button class="btn btn-warning" onclick="exportReportPDF()">📄 PDF Raporu İndir</button>
+                </div>
+                
+                <div id="raporSonuclari" style="margin-top: 30px;"></div>
+            </div>
+            
+            <!-- PDF Arşivi Tab -->
+            <div id="arsiv" class="tab-content">
+                <h2 style="margin-bottom: 20px;">📄 PDF Arşivi ve Eski Form Aktarımı</h2>
+                
+                <!-- Eski Formları PDF Aktarma -->
+                <div class="pdf-section">
+                    <h3>📤 Eski Formları Sisteme Aktarma</h3>
+                    <p>Elle doldurulmuş servis formlarınızı PDF olarak sisteme ekleyin ve manuel giriş yapın.</p>
+                    
+                    <div class="pdf-upload-area" onclick="document.getElementById('pdfInput').click()">
+                        <h4>📁 PDF Dosyalarını Buraya Sürükleyin</h4>
+                        <p>veya tıklayarak seçin</p>
+                        <small>Desteklenen formatlar: PDF, JPG, PNG</small>
+                    </div>
+                    
+                    <input type="file" id="pdfInput" accept=".pdf,image/*" multiple style="display: none;">
+                    
+                    <div id="pdfPreview" class="pdf-preview">
+                        <!-- Yüklenen PDF'ler burada gösterilecek -->
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <button class="btn btn-success" onclick="openQuickEntry()">🚀 Hızlı Form Girişi</button>
+                        <button class="btn btn-primary" onclick="showPDFViewer()">👁️ PDF Görüntüleyici</button>
+                    </div>
+                </div>
+                
+                <!-- Arşiv İstatistikleri -->
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <div class="summary-cards">
+                        <div class="summary-card">
+                            <h3 id="arsivisTalepleri">0</h3>
+                            <p>İş Talepleri</p>
+                        </div>
+                        <div class="summary-card">
+                            <h3 id="arsivServisFormlari">0</h3>
+                            <p>Servis Formları</p>
+                        </div>
+                        <div class="summary-card">
+                            <h3 id="arsivPDFSayisi">0</h3>
+                            <p>PDF Dosyaları</p>
+                        </div>
+                        <div class="summary-card">
+                            <h3 id="arsivVeriBoyu">0 KB</h3>
+                            <p>Veri Boyutu</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-success" onclick="exportFullBackup()">📦 Tam Yedek Al</button>
+                    <button class="btn btn-primary" onclick="importBackup()">📂 Yedek Yükle</button>
+                    <button class="btn btn-danger" onclick="clearAllData()">🗑️ Tümünü Temizle</button>
+                </div>
+            </div>
+            
+            <!-- Ayarlar Tab -->
+            <div id="ayarlar" class="tab-content">
+                <h2 style="margin-bottom: 20px;">⚙️ Sistem Ayarları</h2>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Firma Adı</label>
+                        <input type="text" id="firmaAdi" value="MCA MECHANICAL">
+                    </div>
+                    <div class="form-group">
+                        <label>Bölge</label>
+                        <input type="text" id="bolge" value="Antalya">
+                    </div>
+                    <div class="form-group">
+                        <label>Varsayılan Teknisyen</label>
+                        <input type="text" id="varsayilanTeknisyen">
+                    </div>
+                    <div class="form-group">
+                        <label>Para Birimi</label>
+                        <select id="paraBirimi">
+                            <option value="TL">Türk Lirası (₺)</option>
+                            <option value="USD">Amerikan Doları ($)</option>
+                            <option value="EUR">Euro (€)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="saveSettings()">💾 Ayarları Kaydet</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Ana Modal -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <!-- Hızlı Giriş Modal -->
+    <div id="quickEntryModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <span class="close" onclick="closeModal('quickEntryModal')">&times;</span>
+            <h3>🚀 Hızlı Eski Form Girişi</h3>
+            <p>Eski servis formlarınızı PDF'lere bakarak hızlıca sisteme girin.</p>
+            
+            <form id="quickEntryForm">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Müşteri Adı *</label>
+                        <input type="text" id="qMusteriAdi" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Telefon</label>
+                        <input type="tel" id="qTelefon">
+                    </div>
+                    <div class="form-group">
+                        <label>Adres *</label>
+                        <input type="text" id="qAdres" required>
+                    </div>
+                    <div class="form-group">
+                        <label>İş Türü *</label>
+                        <select id="qIsTuru" required>
+                            <option value="servis">Servis</option>
+                            <option value="bakim">Bakım</option>
+                            <option value="onarim">Onarım</option>
+                            <option value="montaj">Montaj</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Cihaz Tipi</label>
+                        <input type="text" id="qCihazTipi">
+                    </div>
+                    <div class="form-group">
+                        <label>Teknisyen *</label>
+                        <input type="text" id="qTeknisyen" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Form Tarihi *</label>
+                        <input type="date" id="qFormTarihi" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Başlangıç Saati</label>
+                        <input type="time" id="qBaslangic">
+                    </div>
+                    <div class="form-group">
+                        <label>Bitiş Saati</label>
+                        <input type="time" id="qBitis">
+                    </div>
+                    <div class="form-group">
+                        <label>İşçilik Ücreti (TL) *</label>
+                        <input type="number" id="qIscilik" step="0.01" required>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Yapılan İşler *</label>
+                    <textarea id="qYapilanIsler" rows="3" required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Notlar</label>
+                    <textarea id="qNotlar" rows="2"></textarea>
+                </div>
+                
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success">💾
