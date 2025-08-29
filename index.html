@@ -316,7 +316,7 @@
         if (monthlyChartInstance) monthlyChartInstance.destroy();
 
         monthlyChartInstance = new Chart(ctx, {
-            type: 'bar', // GRAFİK TİPİ DEĞİŞTİRİLDİ
+            type: 'bar',
             data: {
                 labels: labels,
                 datasets: [
@@ -337,7 +337,6 @@
             }
         });
     }
-
 
     // --- DIŞA/İÇE AKTARMA ---
     function exportData() {
@@ -526,21 +525,47 @@
     function editJob(jobId) {
         const job = jobs.find(j => j.id === jobId);
         if (!job) return;
+        
         currentJobId = jobId;
         document.getElementById("modalTitle").textContent = "İş Dosyası Düzenle";
-        resetForm();
+        resetForm(); // Formu temizle ve ilk sekmeye getir
         document.getElementById("deleteBtn").style.display = "inline-block";
         
-        Object.keys(job).forEach(key => {
-            const el = document.getElementById(key);
-            if (el && typeof job[key] !== 'undefined') el.value = job[key];
-        });
+        // Formu manuel ve güvenli bir şekilde doldur
+        document.getElementById("jobNo").value = job.id || "";
+        document.getElementById("customerName").value = job.customerName || "";
+        document.getElementById("customerPhone").value = job.customerPhone || "";
+        document.getElementById("customerEmail").value = job.customerEmail || "";
+        document.getElementById("jobType").value = job.jobType || "Servis";
+        document.getElementById("jobStatus").value = job.status || "Aktif";
+        document.getElementById("startDate").value = job.startDate || "";
+        document.getElementById("endDate").value = job.endDate || "";
+        document.getElementById("jobDescription").value = job.description || "";
         
         if (job.workType === "subcontract") {
             document.getElementById("subcontractWork").checked = true;
         } else {
             document.getElementById("ownWork").checked = true;
         }
+
+        document.getElementById("laborCost").value = job.laborCost || 0;
+        document.getElementById("materialCost").value = job.materialCost || 0;
+        document.getElementById("otherCost").value = job.otherCost || 0;
+        document.getElementById("subcontractorName").value = job.subcontractorName || "";
+        document.getElementById("subcontractPrice").value = job.subcontractPrice || 0;
+        document.getElementById("subcontractorContact").value = job.subcontractorContact || "";
+        
+        document.getElementById("quotedPrice").value = job.quotedPrice || 0;
+        document.getElementById("tax").value = job.tax || 18;
+        
+        document.getElementById("deviceName").value = job.deviceName || "";
+        document.getElementById("deviceBrand").value = job.deviceBrand || "";
+        document.getElementById("deviceModel").value = job.deviceModel || "";
+        document.getElementById("serialNo").value = job.serialNo || "";
+        document.getElementById("problemDescription").value = job.problemDescription || "";
+        document.getElementById("workDone").value = job.workDone || "";
+        document.getElementById("partsUsed").value = job.partsUsed || "";
+        document.getElementById("fileLinks").value = job.fileLinks || "";
 
         toggleWorkType();
         calculateProfit();
@@ -605,9 +630,12 @@
         } else {
             cost = parseFloat(document.getElementById("subcontractPrice").value) || 0;
         }
+        
+        const jobIDFromForm = document.getElementById("jobNo").value;
+        const existingJobIndex = jobs.findIndex(j => j.id === jobIDFromForm);
 
         const jobData = {
-            id: document.getElementById("jobNo").value, customerName,
+            id: jobIDFromForm, customerName,
             customerPhone: document.getElementById("customerPhone").value,
             customerEmail: document.getElementById("customerEmail").value,
             jobType: document.getElementById("jobType").value,
@@ -634,16 +662,16 @@
             workDone: document.getElementById("workDone").value,
             partsUsed: document.getElementById("partsUsed").value,
             fileLinks: document.getElementById("fileLinks").value,
-            createdAt: currentJobId ? jobs.find(j=>j.id === currentJobId).createdAt : new Date().toISOString(),
+            createdAt: (existingJobIndex > -1) ? jobs[existingJobIndex].createdAt : new Date().toISOString(),
         };
 
-        if (currentJobId) {
-            const index = jobs.findIndex(j => j.id === currentJobId);
-            if (index !== -1) jobs[index] = jobData;
+        if (existingJobIndex > -1) {
+            jobs[existingJobIndex] = jobData;
         } else {
             jobs.push(jobData);
             jobCounter++;
         }
+
         saveJobsToStorage();
         refreshAllData();
         closeJobModal();
@@ -655,7 +683,10 @@
     }
     
     function confirmDelete(jobId) {
-        if (confirm("Bu iş dosyasını silmek istediğinizden emin misiniz?")) {
+        if (!jobId) {
+            return showNotification("Silinecek iş bulunamadı, ID hatalı.", "error");
+        }
+        if (confirm(`'${jobId}' numaralı iş dosyasını silmek istediğinizden emin misiniz?`)) {
             jobs = jobs.filter(j => j.id !== jobId);
             saveJobsToStorage();
             refreshAllData();
